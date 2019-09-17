@@ -1,25 +1,26 @@
-matrix:
-  include:
-    - os: linux
-      dist: trusty
-      sudo: required
-      language: cpp
-      env: BUILD_TYPE=desktop
-    - os: linux
-      dist: trusty
-      sudo: required
-      language: cpp
-      env: BUILD_TYPE=libretro
-    - os: osx
-      language: cpp
-      env: BUILD_TYPE=ios
+sudo: required
 
-before_install:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo add-apt-repository "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) universe"; fi
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get update -qq; fi
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install -y build-essential qt5-default qttools5-dev-tools freeglut3-dev libsdl2-dev libglew-dev; fi
+language: minimal
+
+env:
+  global:
+    - IMAGE=registry.gitlab.com/bleemsync-dev/docker-autodevops-buildenvs/mmc-crosscompiler-docker-image:latest_internal
+    - TARGETBUILD=gearboy_libretro
+  matrix:
+    - TARGET=nesc CLOUD_DIR=NESC
+    - TARGET=psc CLOUD_DIR=PSC
+
+services:
+  - docker
+
+before_script:
+  - docker login -u ${GITLAB_USER} -p ${GITLAB_PASS} registry.gitlab.com
+  - docker pull ${IMAGE}
+  - docker run -it -d --name crosscomp ${IMAGE} bash
+  - docker exec -it crosscomp bash -c "git clone --depth=50 --branch=master https://github.com/${TRAVIS_REPO_SLUG} ${TRAVIS_REPO_SLUG}"
 
 script:
-  - if [[ "$BUILD_TYPE" == "ios" ]]; then xcodebuild clean build -sdk iphonesimulator -project platforms/ios/Gearboy.xcodeproj -scheme Gearboy CODE_SIGNING_REQUIRED=NO; fi
-  - if [[ "$BUILD_TYPE" == "desktop" ]]; then cd platforms/linux/Gearboy && qmake Gearboy.pro && make; fi
-  - if [[ "$BUILD_TYPE" == "libretro" ]]; then cd platforms/libretro && make; fi
+  - docker exec -it crosscomp bash -c "cd ${TRAVIS_REPO_SLUG} && classic_make_${TARGET} platforms/libretro/Makefile clean"
+  - docker exec -it crosscomp bash -c "cd ${TRAVIS_REPO_SLUG} && classic_make_${TARGET} platforms/libretro/Makefile"
+  - docker exec -it crosscomp bash -c "chown 600 ~/.keys/release_private_key.pem"
+  - docker exec -it crosscomp bash -c "cd ${TRAVIS_REPO_SLUG} && echo -e  'cd /var/www/html/cores/Automated_Builds/${CLOUD_DIR}\nput ${TARGETBUILD}.so' | sftp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i ~/.keys/release_private_key.pem docker@classicmodscloud.com"
